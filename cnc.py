@@ -14,6 +14,7 @@ posicion   = {"x": 0.0, "y": 0.0, "z": 0.0}
 cero_offset= {"x": 0.0, "y": 0.0, "z": 0.0}
 conectado  = False
 abort_flag = threading.Event()   # se activa con PARAR
+serial_lock = threading.Lock()   # ← AGREGAR ESTA LÍNEA
 
 # ============================================================
 # UTILIDAD: GENERAR PASADAS EN Z
@@ -77,27 +78,39 @@ def toggle_conexion():
 # ENVÍO DE GCODE
 # ============================================================
 def enviar_gcode(comando):
-    """Envía un comando y espera 'ok'. Retorna False si se abortó."""
     if not conectado or arduino is None:
         log(f"[SIN CONEXIÓN] {comando}")
         return False
     if abort_flag.is_set():
         return False
-    arduino.write((comando + "\n").encode())
-    log(f">> {comando}")
-    while not abort_flag.is_set():
-        try:
-            respuesta = arduino.readline().decode(errors="replace").strip()
-        except Exception:
-            return False
-        if respuesta:
-            log(f"   {respuesta}")
-        if "ok" in respuesta.lower():
-            return True
-        if "error" in respuesta.lower() or "alarm" in respuesta.lower():
-            log(f"⚠ GRBL: {respuesta}")
-            return False
+    with serial_lock:
+        arduino.write((comando + "\n").encode())
+        log(f">> {comando}")
+        while not abort_flag.is_set():
+            try:
+                respuesta = arduino.readline().decode(errors="replace").strip()
+            except Exception:
+                return False
+            if respuesta:
+                log(f"   {respuesta}")
+            if "ok" in respuesta.lower():
+                return True
+            if "error" in respuesta.lower() or "alarm" in respuesta.lower():
+                log(f"⚠ GRBL: {respuesta}")
+                return False
     return False
+
+def jog_move(axis, direction):
+    """Envía un comando de jog usando el protocolo $J de GRBL."""
+    try:
+        step = float(ent_jog_step.get())
+        feed = int(ent_jog_feed.get())
+    except ValueError:
+        log("⚠ Paso o feed de jog inválido"); return
+
+    dist = step * direction
+    cmd = f"$J=G21 G91 {axis}{dist:.4f} F{feed}"
+    enviar_lista([cmd])
 
 def enviar_lista(cmds, on_done=None, on_progreso=None):
     """Ejecuta lista de comandos en hilo aparte. on_progreso(i, total)."""
@@ -134,6 +147,36 @@ def actualizar_display_pos():
     lbl_pos_x.config(text=f"X: {posicion['x'] - cero_offset['x']:+.3f} mm")
     lbl_pos_y.config(text=f"Y: {posicion['y'] - cero_offset['y']:+.3f} mm")
     lbl_pos_z.config(text=f"Z: {posicion['z'] - cero_offset['z']:+.3f} mm")
+
+def parsear_estado_grbl(linea):
+    import re
+    # $10=2 reporta WPos, también intentamos MPos por si acaso
+    m = re.search(r"WPos:([-\d.]+),([-\d.]+),([-\d.]+)", linea)
+    if not m:
+        m = re.search(r"MPos:([-\d.]+),([-\d.]+),([-\d.]+)", linea)
+    if m:
+        posicion["x"] = float(m.group(1))
+        posicion["y"] = float(m.group(2))
+        posicion["z"] = float(m.group(3))
+        ventana.after(0, actualizar_display_pos)
+
+def hilo_posicion():
+    while True:
+        time.sleep(0.5)
+        if not conectado or arduino is None or not arduino.is_open:
+            continue
+        if serial_lock.locked():
+            continue
+        try:
+            with serial_lock:
+                arduino.write(b"?")
+                time.sleep(0.1)
+                while arduino.in_waiting:
+                    linea = arduino.readline().decode(errors="replace").strip()
+                    if linea.startswith("<"):
+                        parsear_estado_grbl(linea)
+        except Exception:
+            pass
 
 def set_cero(eje=None):
     axes = ["x","y","z"] if eje is None else [eje]
@@ -532,6 +575,51 @@ frm_right.pack(side="left", fill="both", expand=True)
 nb = ttk.Notebook(frm_right)
 nb.pack(fill="both", expand=False)
 
+# ── Tab Jog ──────────────────────────────────────────────────
+tab_j = tk.Frame(nb, bg=BG2); nb.add(tab_j, text="  Jog  ")
+
+# — Paso y feed —
+frm_jog_params = tk.Frame(tab_j, bg=BG2); frm_jog_params.pack(fill="x", padx=10, pady=(10,4))
+
+ent_jog_step = field_row(tab_j, "Paso:", "1")
+ent_jog_feed = field_row(tab_j, "Feed jog:", "500", "mm/m")
+
+# — Presets de paso —
+frm_steps = tk.Frame(tab_j, bg=BG2); frm_steps.pack(fill="x", padx=10, pady=4)
+lbl(frm_steps, "Paso rápido:").pack(side="left")
+for s in ["0.01", "0.1", "1", "5", "10"]:
+    btn(frm_steps, s,
+        lambda v=s: [ent_jog_step.delete(0,"end"), ent_jog_step.insert(0,v)],
+        width=5).pack(side="left", padx=2)
+
+# — Cruz XY —
+frm_jog = tk.Frame(tab_j, bg=BG2); frm_jog.pack(pady=10)
+
+# Fila 1: vacío | Y+ | vacío
+tk.Frame(frm_jog, bg=BG2, width=60, height=60).grid(row=0, column=0, padx=3, pady=3)
+btn(frm_jog,"Y+", lambda:jog_move("Y", 1), color=ACCENT, fg="white", width=4).grid(row=0, column=1, padx=3, pady=3)
+tk.Frame(frm_jog, bg=BG2, width=60, height=60).grid(row=0, column=2, padx=3, pady=3)
+
+# Fila 2: X- | · | X+
+btn(frm_jog,"X-", lambda:jog_move("X",-1), color=ACCENT, fg="white", width=4).grid(row=1, column=0, padx=3, pady=3)
+lbl(frm_jog, "XY").grid(row=1, column=1)
+btn(frm_jog,"X+", lambda:jog_move("X", 1), color=ACCENT, fg="white", width=4).grid(row=1, column=2, padx=3, pady=3)
+
+# Fila 3: vacío | Y- | vacío
+tk.Frame(frm_jog, bg=BG2, width=60, height=60).grid(row=2, column=0, padx=3, pady=3)
+btn(frm_jog,"Y-", lambda:jog_move("Y",-1), color=ACCENT, fg="white", width=4).grid(row=2, column=1, padx=3, pady=3)
+tk.Frame(frm_jog, bg=BG2, width=60, height=60).grid(row=2, column=2, padx=3, pady=3)
+
+# — Eje Z —
+frm_z_jog = tk.Frame(tab_j, bg=BG2); frm_z_jog.pack(pady=4)
+btn(frm_z_jog,"Z+", lambda:jog_move("Z", 1), color=PURPLE, fg="white", width=6).pack(side="left", padx=6)
+btn(frm_z_jog,"Z-", lambda:jog_move("Z",-1), color=PURPLE, fg="white", width=6).pack(side="left", padx=6)
+
+# — Cancelar jog —
+btn(tab_j, "⏹ Cancelar jog",
+    lambda: enviar_lista(["\x85"]),   # 0x85 = jog cancel GRBL
+    color=RED, fg="white", width=20).pack(pady=6)
+
 style = ttk.Style()
 style.theme_use("clam")
 style.configure("TNotebook",    background=BG,  borderwidth=0)
@@ -616,5 +704,7 @@ btn(frm_cmd,"Enviar",enviar_manual,color=ACCENT,fg="white",width=10).pack(side="
 log("CNC Control v2 — con pasadas Z")
 log(f"Puertos disponibles: {listar_puertos()}")
 num_pasadas_label()
+
+threading.Thread(target=hilo_posicion, daemon=True).start()
 
 ventana.mainloop()
