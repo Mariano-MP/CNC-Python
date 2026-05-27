@@ -160,7 +160,6 @@ def actualizar_display_pos():
     lbl_pos_x.config(text=f"{posicion['x'] - cero_offset['x']:+9.3f}")
     lbl_pos_y.config(text=f"{posicion['y'] - cero_offset['y']:+9.3f}")
     lbl_pos_z.config(text=f"{posicion['z'] - cero_offset['z']:+9.3f}")
-    # Actualizar indicador en canvas
     actualizar_cabezal()
 
 def parsear_estado_grbl(linea):
@@ -210,7 +209,6 @@ def hacer_home():
         log("HOME completado ✓")
     enviar_lista(["$X","$H"], on_done=_done)
 
-
 def parar():
     abort_flag.set()
     if arduino and arduino.is_open:
@@ -230,6 +228,16 @@ def get_tabla():
         }
     except ValueError:
         messagebox.showerror("Error","Dimensiones de tabla inválidas"); return None
+
+def get_maquina():
+    """Retorna las dimensiones máximas de la máquina."""
+    try:
+        return {
+            "x": float(ent_maq_x.get()),
+            "y": float(ent_maq_y.get()),
+        }
+    except ValueError:
+        return {"x": 370.0, "y": 170.0}
 
 def get_z_params():
     try:
@@ -263,144 +271,246 @@ def num_pasadas_label():
     lbl_pasadas.config(text=f"{n} pasadas  →  Z={zp['z_final']:.2f} mm")
 
 # ============================================================
-# CANVAS PREVIEW
+# CANVAS PREVIEW — NUEVO SISTEMA
 # ============================================================
-# La previsualización se dibuja en un canvas Tkinter.
-# Se escala la tabla al tamaño del canvas con márgenes.
-
 CANVAS_W = 440
 CANVAS_H = 340
-MARGIN   = 30   # px de margen en canvas
 
-_preview_path  = []   # lista de (x_mm, y_mm) en coordenadas CNC
-_cabezal_pos   = [0.0, 0.0]   # posición actual del cabezal en mm
+_preview_path = []
 
-def mm_to_canvas(x_mm, y_mm, tabla_x, tabla_y, cw, ch):
-    """Convierte coordenadas CNC mm → píxeles canvas."""
-    usable_w = cw - 2 * MARGIN
-    usable_h = ch - 2 * MARGIN
-    scale = min(usable_w / tabla_x, usable_h / tabla_y)
-    # Centrar
-    off_x = MARGIN + (usable_w - tabla_x * scale) / 2
-    off_y = MARGIN + (usable_h - tabla_y * scale) / 2
+def calcular_transform(maq_x, maq_y, cw, ch):
+    """
+    Calcula la transformación mm → píxeles para el canvas.
+    El área de la máquina ocupa el espacio útil del canvas.
+    """
+    PAD_LEFT   = 46   # espacio para etiquetas Y
+    PAD_RIGHT  = 12
+    PAD_TOP    = 12
+    PAD_BOTTOM = 30   # espacio para etiquetas X
+
+    usable_w = cw - PAD_LEFT - PAD_RIGHT
+    usable_h = ch - PAD_TOP - PAD_BOTTOM
+
+    scale = min(usable_w / maq_x, usable_h / maq_y)
+
+    # Centrar dentro del espacio útil
+    off_x = PAD_LEFT + (usable_w - maq_x * scale) / 2
+    off_y = PAD_TOP  + (usable_h - maq_y * scale) / 2
+
+    return scale, off_x, off_y
+
+def mm_to_canvas_new(x_mm, y_mm, scale, off_x, off_y, maq_y):
+    """Convierte mm → píxeles. Y se invierte (0 abajo, maq_y arriba)."""
     px = off_x + x_mm * scale
-    py = off_y + (tabla_y - y_mm) * scale   # invertir Y
-    return px, py, scale
+    py = off_y + (maq_y - y_mm) * scale
+    return px, py
+
+def calcular_paso_grid(scale):
+    """
+    Elige el paso de grilla (en mm) de modo que los píxeles entre
+    líneas queden entre 30 y 80 px aproximadamente.
+    """
+    candidatos = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500]
+    for paso in candidatos:
+        if paso * scale >= 35:
+            return paso
+    return 500
 
 def dibujar_canvas(path_puntos=None, tipo="recta", cabezal=None):
-    """Redibuja todo el canvas de previsualización."""
+    """Redibuja el canvas completo con ejes, cuadrícula, tabla y trayectoria."""
     global _preview_path
-    d = get_tabla()
+
+    d   = get_tabla()
+    maq = get_maquina()
     if not d:
         return
 
     canvas_preview.delete("all")
     cw = CANVAS_W
     ch = CANVAS_H
-    tx = d["x"]
-    ty = d["y"]
 
-    # Fondo oscuro con gradiente simulado
+    maq_x = maq["x"]
+    maq_y = maq["y"]
+    tab_x = d["x"]
+    tab_y = d["y"]
+
+    scale, off_x, off_y = calcular_transform(maq_x, maq_y, cw, ch)
+
+    def to_c(x, y):
+        return mm_to_canvas_new(x, y, scale, off_x, off_y, maq_y)
+
+    # ── Fondo ────────────────────────────────────────────────
     canvas_preview.config(bg="#090c10")
 
-    # Grid de fondo
-    grid_step_mm = 50
-    _, _, scale = mm_to_canvas(0, 0, tx, ty, cw, ch)
-    grid_px = grid_step_mm * scale
-    usable_w = cw - 2 * MARGIN
-    usable_h = ch - 2 * MARGIN
-    real_scale = min(usable_w / tx, usable_h / ty)
-    off_x = MARGIN + (usable_w - tx * real_scale) / 2
-    off_y = MARGIN + (usable_h - ty * real_scale) / 2
+    # ── Cuadrícula con paso calculado ───────────────────────
+    paso = calcular_paso_grid(scale)
 
-    # Líneas de grid
-    x = off_x
-    while x <= off_x + tx * real_scale:
-        canvas_preview.create_line(x, off_y, x, off_y + ty * real_scale,
-                                   fill="#131a24", width=1)
-        x += grid_step_mm * real_scale
+    x_mm = 0
+    while x_mm <= maq_x:
+        px, _ = to_c(x_mm, 0)
+        _, py_top = to_c(0, maq_y)
+        _, py_bot = to_c(0, 0)
+        canvas_preview.create_line(px, py_top, px, py_bot,
+                                   fill="#18283a", width=1)
+        x_mm += paso
 
-    y = off_y
-    while y <= off_y + ty * real_scale:
-        canvas_preview.create_line(off_x, y, off_x + tx * real_scale, y,
-                                   fill="#131a24", width=1)
-        y += grid_step_mm * real_scale
+    y_mm = 0
+    while y_mm <= maq_y:
+        px_left,  py = to_c(0, y_mm)
+        px_right, _  = to_c(maq_x, y_mm)
+        canvas_preview.create_line(px_left, py, px_right, py,
+                                   fill="#18283a", width=1)
+        y_mm += paso
 
-    # Tabla (borde con glow simulado)
-    x0c, y0c, _ = mm_to_canvas(0, 0, tx, ty, cw, ch)
-    xfc, yfc, _ = mm_to_canvas(tx, ty, tx, ty, cw, ch)
+    # ── Etiquetas del eje X ──────────────────────────────────
+    x_mm = 0
+    while x_mm <= maq_x:
+        px, _ = to_c(x_mm, 0)
+        _, py_bot = to_c(0, 0)
+        canvas_preview.create_text(px, py_bot + 10,
+                                   text=str(int(x_mm)),
+                                   fill="#3a6080", font=FONT_SMALL,
+                                   anchor="n")
+        x_mm += paso
 
-    # Sombra suave tabla
-    for d_s in [6, 4, 2]:
-        canvas_preview.create_rectangle(
-            x0c - d_s, yfc - d_s, xfc + d_s, y0c + d_s,
-            outline=ACCENT, width=1,
-            fill=""
-        )
-    # Relleno tabla
-    canvas_preview.create_rectangle(x0c, yfc, xfc, y0c,
+    # Título eje X
+    px_mid, _ = to_c(maq_x / 2, 0)
+    _, py_bot = to_c(0, 0)
+    canvas_preview.create_text(px_mid, py_bot + 22,
+                               text="X (mm)", fill="#2a5070",
+                               font=FONT_SMALL)
+
+    # ── Etiquetas del eje Y ──────────────────────────────────
+    y_mm = 0
+    while y_mm <= maq_y:
+        px_left, py = to_c(0, y_mm)
+        canvas_preview.create_text(px_left - 4, py,
+                                   text=str(int(y_mm)),
+                                   fill="#3a6080", font=FONT_SMALL,
+                                   anchor="e")
+        y_mm += paso
+
+    # Título eje Y (vertical, simulado con texto corto)
+    _, py_mid = to_c(0, maq_y / 2)
+    px_left,  _ = to_c(0, 0)
+    canvas_preview.create_text(px_left - 34, py_mid,
+                               text="Y\n(mm)", fill="#2a5070",
+                               font=FONT_SMALL, anchor="center")
+
+    # ── Flechas de ejes ─────────────────────────────────────
+    ox, oy = to_c(0, 0)
+    ex, _  = to_c(maq_x, 0)
+    _, ey  = to_c(0, maq_y)
+
+    # Eje X
+    canvas_preview.create_line(ox, oy, ex + 10, oy,
+                               fill="#1a4a7a", width=1.5, arrow="last",
+                               arrowshape=(7, 9, 3))
+    # Eje Y
+    canvas_preview.create_line(ox, oy, ox, ey - 10,
+                               fill="#1a4a7a", width=1.5, arrow="last",
+                               arrowshape=(7, 9, 3))
+
+    # ── Borde área máquina (línea punteada azul tenue) ───────
+    x0m, y0m = to_c(0, 0)
+    xfm, yfm = to_c(maq_x, maq_y)
+    canvas_preview.create_rectangle(x0m, yfm, xfm, y0m,
+                                    outline="#1a5090", width=1,
+                                    dash=(6, 4), fill="")
+    canvas_preview.create_text(xfm - 2, yfm - 2,
+                               text=f"Máq {maq_x:.0f}×{maq_y:.0f}",
+                               fill="#1a5090", font=FONT_SMALL,
+                               anchor="se")
+
+    # ── Tabla de trabajo (borde cian sólido) ─────────────────
+    x0t, y0t = to_c(0, 0)
+    xft, yft = to_c(tab_x, tab_y)
+
+    # Relleno semitransparente simulado con stipple
+    canvas_preview.create_rectangle(x0t, yft, xft, y0t,
                                     outline=ACCENT, width=2,
-                                    fill="#0d1520",
-                                    stipple="")
+                                    fill="#091830", stipple="gray12")
+    canvas_preview.create_rectangle(x0t, yft, xft, y0t,
+                                    outline=ACCENT, width=2, fill="")
 
-    # Etiquetas dimensiones
-    mid_x = (x0c + xfc) / 2
-    canvas_preview.create_text(mid_x, y0c + 14,
-                                text=f"← {tx:.0f} mm →",
-                                fill=FG2, font=FONT_SMALL)
-    canvas_preview.create_text(x0c - 16, (y0c + yfc) / 2,
-                                text=f"{ty:.0f}", fill=FG2, font=FONT_SMALL, angle=90)
+    # Cotas de la tabla
+    mid_x_t = (x0t + xft) / 2
+    canvas_preview.create_text(mid_x_t, y0t + 14,
+                               text=f"← {tab_x:.0f} mm →",
+                               fill=ACCENT, font=FONT_SMALL)
+    mid_y_t = (y0t + yft) / 2
+    canvas_preview.create_text(x0t - 18, mid_y_t,
+                               text=f"{tab_y:.0f}", fill=ACCENT,
+                               font=FONT_SMALL, angle=90)
 
-    # Origen (X=0, Y=0)
-    ox, oy, _ = mm_to_canvas(0, 0, tx, ty, cw, ch)
-    canvas_preview.create_oval(ox-5, oy-5, ox+5, oy+5,
-                                fill=ACCENT, outline=ACCENT)
-    canvas_preview.create_text(ox + 10, oy - 8, text="0,0",
-                                fill=ACCENT, font=FONT_SMALL)
+    # ── Origen 0,0 ───────────────────────────────────────────
+    canvas_preview.create_oval(ox - 5, oy - 5, ox + 5, oy + 5,
+                               fill=ACCENT, outline=ACCENT)
+    canvas_preview.create_text(ox + 10, oy - 8,
+                               text="0,0", fill=ACCENT, font=FONT_SMALL)
 
-    # Trayectoria
+    # ── Trayectoria (línea punteada ámbar) ───────────────────
     if path_puntos and len(path_puntos) >= 2:
         _preview_path = path_puntos
-        pts_canvas = [mm_to_canvas(px, py, tx, ty, cw, ch)[:2]
-                      for (px, py) in path_puntos]
+        pts_canvas = [to_c(px, py) for (px, py) in path_puntos]
 
-        # Línea de la trayectoria (glow)
-        for offset, color, width in [(4, "#003344", 5), (2, "#005566", 3), (0, ACCENT, 2)]:
-            flat = []
-            for (px, py) in pts_canvas:
-                flat.extend([px, py])
-            if len(flat) >= 4:
-                canvas_preview.create_line(*flat, fill=color, width=width,
-                                           smooth=True if tipo == "arco" else False,
-                                           capstyle="round", joinstyle="round")
+        # Línea punteada: se dibuja segmento a segmento con dash
+        for i in range(len(pts_canvas) - 1):
+            x1c, y1c = pts_canvas[i]
+            x2c, y2c = pts_canvas[i + 1]
+            canvas_preview.create_line(x1c, y1c, x2c, y2c,
+                                       fill=AMBER, width=2,
+                                       dash=(8, 5),
+                                       capstyle="round")
 
-        # Marcadores inicio/fin
+        # Marcadores inicio / fin
         sx, sy = pts_canvas[0]
-        ex, ey = pts_canvas[-1]
-        canvas_preview.create_oval(sx-5, sy-5, sx+5, sy+5, fill=GREEN, outline=GREEN)
-        canvas_preview.create_text(sx + 10, sy - 8, text="START", fill=GREEN, font=FONT_SMALL)
-        canvas_preview.create_oval(ex-5, ey-5, ex+5, ey+5, fill=AMBER, outline=AMBER)
-        canvas_preview.create_text(ex + 10, ey - 8, text="END", fill=AMBER, font=FONT_SMALL)
+        ex2, ey2 = pts_canvas[-1]
+        canvas_preview.create_oval(sx - 5, sy - 5, sx + 5, sy + 5,
+                                   fill=GREEN, outline=GREEN)
+        canvas_preview.create_text(sx + 10, sy - 8,
+                                   text="S", fill=GREEN, font=FONT_SMALL)
+        canvas_preview.create_oval(ex2 - 5, ey2 - 5, ex2 + 5, ey2 + 5,
+                                   fill=AMBER, outline=AMBER)
+        canvas_preview.create_text(ex2 + 10, ey2 - 8,
+                                   text="E", fill=AMBER, font=FONT_SMALL)
 
-    # Cabezal (posición actual)
+    # ── Cabezal (posición actual) ─────────────────────────────
     hx = cabezal[0] if cabezal else (posicion["x"] - cero_offset["x"])
     hy = cabezal[1] if cabezal else (posicion["y"] - cero_offset["y"])
-    hxc, hyc, _ = mm_to_canvas(hx, hy, tx, ty, cw, ch)
+    hxc, hyc = to_c(hx, hy)
 
-    # Cruz del cabezal
     size = 10
     canvas_preview.create_line(hxc - size, hyc, hxc + size, hyc,
-                                fill=RED, width=2)
+                               fill=RED, width=2)
     canvas_preview.create_line(hxc, hyc - size, hxc, hyc + size,
-                                fill=RED, width=2)
+                               fill=RED, width=2)
     canvas_preview.create_oval(hxc - 5, hyc - 5, hxc + 5, hyc + 5,
-                                outline=RED, width=2, fill="")
-    # Pulso animado (círculo exterior)
+                               outline=RED, width=2, fill="")
     canvas_preview.create_oval(hxc - 10, hyc - 10, hxc + 10, hyc + 10,
-                                outline=RED, width=1, fill="", dash=(3,3))
+                               outline=RED, width=1, fill="", dash=(3, 3))
+
+    # ── Leyenda ───────────────────────────────────────────────
+    lx, ly = 6, ch - 12
+    items = [
+        ("━", "#1a5090", f"Máquina ({maq_x:.0f}×{maq_y:.0f})"),
+        ("━", ACCENT,    "Tabla de trabajo"),
+        ("╌", AMBER,     "Trayectoria"),
+        ("●", GREEN,     "Inicio (S)"),
+        ("●", AMBER,     "Fin (E)"),
+        ("✛", RED,       "Cabezal"),
+    ]
+    for sym, color, label in items:
+        canvas_preview.create_text(lx, ly, text=sym,
+                                   fill=color, font=FONT_SMALL, anchor="w")
+        lx += 10
+        canvas_preview.create_text(lx, ly, text=label,
+                                   fill=FG2, font=FONT_SMALL, anchor="w")
+        lx += len(label) * 6 + 10
+
 
 def actualizar_cabezal():
-    """Actualiza solo la posición del cabezal sin redibujar todo."""
+    """Actualiza el canvas con la posición actual del cabezal."""
     try:
         dibujar_canvas(path_puntos=_preview_path if _preview_path else None,
                        tipo="recta")
@@ -423,11 +533,11 @@ def preview_arco():
         r  = float(ent_a_r.get())
     except ValueError:
         return
-    # Semiarco: de (cx-r, cy) a (cx+r, cy) pasando por (cx, cy+r)
     pts = []
-    for ang in range(0, 181, 5):   # 0° → 180°
+    for ang in range(0, 181, 3):
         rad = math.radians(ang)
-        pts.append((cx + r * math.cos(math.pi - rad), cy + r * math.sin(math.pi - rad)))
+        pts.append((cx + r * math.cos(math.pi - rad),
+                    cy + r * math.sin(math.pi - rad)))
     dibujar_canvas(path_puntos=pts, tipo="arco")
 
 def preview_perimetro():
@@ -520,7 +630,8 @@ def trayectoria_recta():
     prog_bar["value"] = 0
     log(f"▶ Recta: {len(cmds)} comandos")
     enviar_lista(cmds,
-        on_done=lambda: [lbl_tray_info.config(text="✓ Recta completada", fg=GREEN), prog_bar.__setitem__("value", 100)],
+        on_done=lambda: [lbl_tray_info.config(text="✓ Recta completada", fg=GREEN),
+                         prog_bar.__setitem__("value", 100)],
         on_progreso=on_progreso)
 
 def trayectoria_arco():
@@ -533,14 +644,15 @@ def trayectoria_arco():
     except ValueError:
         messagebox.showerror("Error","Valores inválidos"); return
     preview_arco()
-    x1 = cx - r; y1 = cy; x2 = cx + r; y2 = cy; I = r; J = 0
+    x1 = cx - r; y1 = cy; x2 = cx + r; y2 = cy; I = -r; J = 0
     pasadas = calcular_pasadas(0, zp["z_final"], zp["paso"]) if zp["z_final"] != 0 else [0]
     lbl_tray_info.config(text=f"Semiarco R={r:.1f}mm  ×{len(pasadas)} pasada(s)", fg=ACCENT)
     cmds = build_gcode_arco(x1, y1, x2, y2, I, J, dire, feed, zp)
     prog_bar["value"] = 0
     log(f"▶ Semiarco R={r:.1f}: {len(cmds)} comandos")
     enviar_lista(cmds,
-        on_done=lambda: [lbl_tray_info.config(text="✓ Semiarco completado", fg=GREEN), prog_bar.__setitem__("value", 100)],
+        on_done=lambda: [lbl_tray_info.config(text="✓ Semiarco completado", fg=GREEN),
+                         prog_bar.__setitem__("value", 100)],
         on_progreso=on_progreso)
 
 def trayectoria_perimetro():
@@ -558,7 +670,8 @@ def trayectoria_perimetro():
     prog_bar["value"] = 0
     log(f"▶ Perímetro: {len(cmds)} comandos")
     enviar_lista(cmds,
-        on_done=lambda: [lbl_tray_info.config(text="✓ Perímetro completado", fg=GREEN), prog_bar.__setitem__("value", 100)],
+        on_done=lambda: [lbl_tray_info.config(text="✓ Perímetro completado", fg=GREEN),
+                         prog_bar.__setitem__("value", 100)],
         on_progreso=on_progreso)
 
 def recta_ancho_tabla():
@@ -619,7 +732,6 @@ def make_btn(parent, text, cmd, color=BG4, fg=FG, width=14, accent=False):
 
 def section_frame(parent, title, color=BG3):
     outer = tk.Frame(parent, bg=color, bd=0)
-    # título con barra de color
     bar = tk.Frame(outer, bg=ACCENT, height=2)
     bar.pack(fill="x")
     header = tk.Frame(outer, bg=color)
@@ -654,13 +766,11 @@ ventana.resizable(True, True)
 frm_header = tk.Frame(ventana, bg="#070a0d", pady=0)
 frm_header.pack(fill="x")
 
-# Línea decorativa superior
 tk.Frame(frm_header, bg=ACCENT, height=2).pack(fill="x")
 
 frm_header_inner = tk.Frame(frm_header, bg="#070a0d", pady=6)
 frm_header_inner.pack(fill="x", padx=12)
 
-# Título
 tk.Label(frm_header_inner, text="CNC", bg="#070a0d",
          fg=ACCENT, font=("Courier New", 18, "bold")).pack(side="left")
 tk.Label(frm_header_inner, text=" CONTROL  ", bg="#070a0d",
@@ -668,10 +778,8 @@ tk.Label(frm_header_inner, text=" CONTROL  ", bg="#070a0d",
 tk.Label(frm_header_inner, text="▸ GRBL", bg="#070a0d",
          fg=FG2, font=("Courier New", 11)).pack(side="left")
 
-# Separador vertical
 tk.Frame(frm_header_inner, bg="#1a2535", width=2).pack(side="left", fill="y", padx=14)
 
-# Puerto + baud
 tk.Label(frm_header_inner, text="PORT", bg="#070a0d",
          fg=FG2, font=FONT_SMALL).pack(side="left")
 puertos = listar_puertos() or ["COM3"]
@@ -704,7 +812,6 @@ lbl_estado = tk.Label(frm_header_inner, text="●  Desconectado",
                        bg="#070a0d", fg=RED, font=FONT_MONO)
 lbl_estado.pack(side="left", padx=8)
 
-# PARAR (derecha)
 frm_parar = tk.Frame(frm_header_inner, bg=RED, bd=0)
 frm_parar.pack(side="right", padx=8)
 tk.Button(frm_parar, text="  ⛔  PARAR  ", command=parar,
@@ -743,7 +850,6 @@ for axis, color in [("X", GREEN), ("Y", RED), ("Z", ACCENT)]:
     elif axis == "Y": lbl_pos_y = lbl_name
     else: lbl_pos_z = lbl_name
 
-# Botones cero
 frm_ceros = tk.Frame(inner_dro, bg=BG2)
 frm_ceros.pack(fill="x", pady=(4,0))
 for txt, ax in [("X=0","x"),("Y=0","y"),("Z=0","z")]:
@@ -757,15 +863,23 @@ frm_tab, inner_tab = section_frame(frm_colA, "▸ Tabla de trabajo", BG2)
 frm_tab.pack(fill="x", pady=(1,1))
 
 ent_tabla_x = field_row(inner_tab, "Ancho  X :", "300")
-ent_tabla_y = field_row(inner_tab, "Alto   Y :", "200")
+ent_tabla_y = field_row(inner_tab, "Alto   Y :", "170")
 ent_tabla_z = field_row(inner_tab, "Espesor Z:", "2")
 
-def on_tabla_change(*a):
+# — Dimensiones máquina (NUEVO) —
+frm_maq, inner_maq = section_frame(frm_colA, "▸ Área máxima máquina", BG2)
+frm_maq.pack(fill="x", pady=(1,1))
+
+ent_maq_x = field_row(inner_maq, "Máquina X :", "370")
+ent_maq_y = field_row(inner_maq, "Máquina Y :", "170")
+
+def on_dim_change(*a):
     try: dibujar_canvas()
     except: pass
 
-ent_tabla_x.bind("<FocusOut>", on_tabla_change)
-ent_tabla_y.bind("<FocusOut>", on_tabla_change)
+for e in [ent_tabla_x, ent_tabla_y, ent_maq_x, ent_maq_y]:
+    e.bind("<FocusOut>", on_dim_change)
+    e.bind("<Return>",   on_dim_change)
 
 # — HOME —
 make_btn(frm_colA, "⌂  IR A HOME", hacer_home,
@@ -786,7 +900,6 @@ for txt, val in [("Superficie (Z=0)", "superficie"),
                    command=lambda: [toggle_z_ui(), num_pasadas_label()]
                    ).pack(anchor="w", pady=1)
 
-# Profundidad manual
 frm_zp = tk.Frame(inner_z, bg=BG2); frm_zp.pack(fill="x", pady=2)
 tk.Label(frm_zp, text="Profundidad:", bg=BG2, fg=FG2,
          font=FONT_MONO, width=14, anchor="w").pack(side="left")
@@ -817,7 +930,6 @@ toggle_z_ui()
 frm_colB = tk.Frame(frm_body, bg=BG3)
 frm_colB.pack(side="left", fill="both", expand=True, padx=(0,1))
 
-# Header del canvas
 frm_canvas_header = tk.Frame(frm_colB, bg="#070a0d", pady=4)
 frm_canvas_header.pack(fill="x")
 tk.Frame(frm_canvas_header, bg=GREEN, height=2).pack(fill="x")
@@ -828,12 +940,10 @@ tk.Label(frm_ch_inner, text="VISTA DE TABLA", bg="#070a0d",
 tk.Label(frm_ch_inner, text="  — previsualización de trayectoria", bg="#070a0d",
          fg=FG2, font=FONT_SMALL).pack(side="left")
 
-# Botón limpiar
 make_btn(frm_ch_inner, "✕ Limpiar",
          lambda: [canvas_preview.delete("all"), dibujar_canvas()],
          color="#1a0505", fg=RED, width=10).pack(side="right")
 
-# Canvas
 canvas_frame = tk.Frame(frm_colB, bg=BG3, pady=4)
 canvas_frame.pack(fill="both", expand=True, padx=8)
 
@@ -843,7 +953,6 @@ canvas_preview = tk.Canvas(canvas_frame, width=CANVAS_W, height=CANVAS_H,
                              relief="flat")
 canvas_preview.pack(expand=True)
 
-# Info barra
 frm_tray_bar = tk.Frame(frm_colB, bg="#070a0d", pady=4)
 frm_tray_bar.pack(fill="x")
 tk.Frame(frm_tray_bar, bg="#1a2535", height=1).pack(fill="x")
@@ -868,7 +977,6 @@ frm_colC = tk.Frame(frm_body, bg=BG2, width=310)
 frm_colC.pack(side="left", fill="y", padx=(0,0))
 frm_colC.pack_propagate(False)
 
-# Notebook
 style_nb = ttk.Style()
 style_nb.configure("Dark.TNotebook",
                    background=BG2, borderwidth=0,
@@ -897,7 +1005,6 @@ for s in ["0.1","1","5","10"]:
              lambda v=s: [ent_jog_step.delete(0,"end"), ent_jog_step.insert(0,v)],
              width=4).pack(side="left", padx=1)
 
-# Cruz jog
 frm_jog = tk.Frame(tab_j, bg=BG2); frm_jog.pack(pady=8)
 jog_cfg = [
     (0,1, "Y+", "Y",  1, RED),
@@ -932,13 +1039,13 @@ ent_r_x2 = field_row(tab_r, "X₂:", "300")
 ent_r_y2 = field_row(tab_r, "Y₂:", "0")
 ent_r_feed = field_row(tab_r, "Feed XY:", "500", "mm/m")
 
-# Preview en tiempo real
-for e in [ent_r_x1, ent_r_y1, ent_r_x2, ent_r_y2]:
-    e.bind("<KeyRelease>", lambda ev: preview_recta())
-
 frm_rb = tk.Frame(tab_r, bg=BG2); frm_rb.pack(fill="x", padx=8, pady=6)
 make_btn(frm_rb, "= Ancho tabla", recta_ancho_tabla, width=13).pack(side="left", padx=2)
 make_btn(frm_rb, "= Diagonal",    recta_diagonal,    width=11).pack(side="left", padx=2)
+
+# BOTÓN PREVISUALIZAR (nuevo, explícito)
+make_btn(tab_r, "👁  PREVISUALIZAR", preview_recta,
+         color="#001a0a", fg=GREEN, width=26).pack(fill="x", padx=8, pady=(0,2))
 
 make_btn(tab_r, "▶  EJECUTAR RECTA", trayectoria_recta,
          color="#001a33", fg=ACCENT, width=26).pack(fill="x", padx=8, pady=4)
@@ -952,9 +1059,6 @@ ent_a_cy  = field_row(tab_a, "Centro Y:", "0")
 ent_a_r   = field_row(tab_a, "Radio:", "150")
 ent_a_feed= field_row(tab_a, "Feed XY:", "300", "mm/m")
 
-for e in [ent_a_cx, ent_a_cy, ent_a_r]:
-    e.bind("<KeyRelease>", lambda ev: preview_arco())
-
 frm_adir = tk.Frame(tab_a, bg=BG2); frm_adir.pack(fill="x", padx=10, pady=3)
 tk.Label(frm_adir, text="Dirección:", bg=BG2, fg=FG2,
          font=FONT_MONO, width=12, anchor="w").pack(side="left")
@@ -962,11 +1066,14 @@ var_dir = tk.StringVar(value="G2")
 for txt, val in [("G2 Horario","G2"),("G3 Anti-h.","G3")]:
     tk.Radiobutton(frm_adir, text=txt, variable=var_dir, value=val,
                    bg=BG2, fg=FG2, selectcolor="#0d1520",
-                   activebackground=BG2, font=FONT_SMALL,
-                   command=preview_arco).pack(side="left", padx=4)
+                   activebackground=BG2, font=FONT_SMALL).pack(side="left", padx=4)
 
 frm_ab = tk.Frame(tab_a, bg=BG2); frm_ab.pack(fill="x", padx=8, pady=4)
 make_btn(frm_ab, "Radio=Ancho/2", arco_desde_tabla, width=15).pack(side="left", padx=2)
+
+# BOTÓN PREVISUALIZAR (nuevo, explícito)
+make_btn(tab_a, "👁  PREVISUALIZAR", preview_arco,
+         color="#001a0a", fg=GREEN, width=26).pack(fill="x", padx=8, pady=(0,2))
 
 make_btn(tab_a, "▶  EJECUTAR ARCO", trayectoria_arco,
          color="#001a33", fg=ACCENT, width=26).pack(fill="x", padx=8, pady=4)
@@ -979,9 +1086,8 @@ tk.Label(tab_p, text="Recorre el borde de la tabla completo",
 ent_p_off  = field_row(tab_p, "Offset (margen):", "0")
 ent_p_feed = field_row(tab_p, "Feed XY:", "400", "mm/m")
 
-ent_p_off.bind("<KeyRelease>", lambda ev: preview_perimetro())
-
-make_btn(tab_p, "👁 PREVISUALIZAR", preview_perimetro,
+# BOTÓN PREVISUALIZAR (mantenido + ahora también explícito sin auto-bind)
+make_btn(tab_p, "👁  PREVISUALIZAR", preview_perimetro,
          color="#001a0a", fg=GREEN, width=26).pack(fill="x", padx=8, pady=(6,2))
 make_btn(tab_p, "▶  EJECUTAR PERÍMETRO", trayectoria_perimetro,
          color="#001a33", fg=ACCENT, width=26).pack(fill="x", padx=8, pady=4)
@@ -1042,10 +1148,10 @@ tk.Label(frm_footer, text="⚠ Verifique límites antes de ejecutar  ",
 # ============================================================
 # INICIO
 # ============================================================
-log("CNC Control v3  ▸  con pasadas Z + previsualización")
+log("CNC Control v3  ▸  con pasadas Z + previsualización mejorada")
 log(f"Puertos disponibles: {listar_puertos()}")
 num_pasadas_label()
-dibujar_canvas()   # dibuja tabla vacía al inicio
+dibujar_canvas()
 
 threading.Thread(target=hilo_posicion, daemon=True).start()
 ventana.mainloop()
