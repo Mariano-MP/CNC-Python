@@ -93,27 +93,43 @@ def toggle_conexion():
 # ============================================================
 # ENVÍO DE GCODE
 # ============================================================
+import queue
+respuesta_queue = queue.Queue()
+
 def enviar_gcode(comando):
     if not conectado or arduino is None:
         log(f"[SIN CONEXIÓN] {comando}")
         return False
     if abort_flag.is_set():
         return False
+    
+    # Vaciar la cola antes de enviar
+    while not respuesta_queue.empty():
+        try: respuesta_queue.get_nowait()
+        except: pass
+    
     with serial_lock:
         arduino.write((comando + "\n").encode())
-        log(f"→ {comando}")
+    
+    log(f"→ {comando}")
+    
+    # Esperar ok/error de la cola (el hilo lector la llena)
+    timeout = 60 if comando.strip() in ("$H",) else 10
+    try:
         while not abort_flag.is_set():
             try:
-                respuesta = arduino.readline().decode(errors="replace").strip()
-            except Exception:
-                return False
-            if respuesta:
+                respuesta = respuesta_queue.get(timeout=timeout)
                 log(f"  ← {respuesta}")
-            if "ok" in respuesta.lower():
-                return True
-            if "error" in respuesta.lower() or "alarm" in respuesta.lower():
-                log(f"⚠ GRBL: {respuesta}")
+                if "ok" in respuesta.lower():
+                    return True
+                if "error" in respuesta.lower() or "alarm" in respuesta.lower():
+                    log(f"⚠ GRBL: {respuesta}")
+                    return False
+            except queue.Empty:
+                log("⚠ Timeout esperando respuesta GRBL")
                 return False
+    except Exception:
+        return False
     return False
 
 def jog_move(axis, direction):
@@ -178,18 +194,35 @@ def hilo_posicion():
         time.sleep(0.5)
         if not conectado or arduino is None or not arduino.is_open:
             continue
-        if serial_lock.locked():
-            continue
         try:
-            with serial_lock:
-                arduino.write(b"?")
-                time.sleep(0.1)
-                while arduino.in_waiting:
-                    linea = arduino.readline().decode(errors="replace").strip()
-                    if linea.startswith("<"):
-                        parsear_estado_grbl(linea)
+            # '?' en GRBL es un "realtime command" — no necesita lock,
+            # se puede enviar en cualquier momento interrumpiendo el stream
+            arduino.write(b"?")
         except Exception:
             pass
+
+def hilo_leer_serial():
+    """Lee todo lo que llega del arduino continuamente."""
+    while True:
+        if not conectado or arduino is None or not arduino.is_open:
+            time.sleep(0.2)
+            continue
+        try:
+            if arduino.in_waiting:
+                linea = arduino.readline().decode(errors="replace").strip()
+                if linea:
+                    if linea.startswith("<"):
+                        # Respuesta de posición — parsear silenciosamente
+                        parsear_estado_grbl(linea)
+                    elif linea.lower() == "ok" or "error" in linea.lower():
+                        # Poner en cola para que enviar_gcode lo consuma
+                        respuesta_queue.put(linea)
+                    else:
+                        # Mensajes informativos de GRBL
+                        log(f"  ← {linea}")
+        except Exception:
+            pass
+        time.sleep(0.01)
 
 def set_cero(eje=None):
     axes = ["x","y","z"] if eje is None else [eje]
@@ -201,13 +234,49 @@ def set_cero(eje=None):
     label = "XYZ" if eje is None else eje.upper()
     log(f"Cero → {label}=0")
 
+def enviar_gcode_home(comando):
+    """Versión especial para $H con timeout extendido."""
+    if not conectado or arduino is None:
+        log(f"[SIN CONEXIÓN] {comando}")
+        return False
+    with serial_lock:
+        arduino.write((comando + "\n").encode())
+        log(f"→ {comando}")
+        # timeout extendido para homing
+        old_timeout = arduino.timeout
+        arduino.timeout = 60
+        try:
+            while True:
+                try:
+                    respuesta = arduino.readline().decode(errors="replace").strip()
+                except Exception:
+                    return False
+                if respuesta:
+                    log(f"  ← {respuesta}")
+                if "ok" in respuesta.lower():
+                    return True
+                if "error" in respuesta.lower() or "alarm" in respuesta.lower():
+                    log(f"⚠ GRBL: {respuesta}")
+                    return False
+        finally:
+            arduino.timeout = old_timeout
+
 def hacer_home():
-    def _done():
-        posicion.update({"x":0.0,"y":0.0,"z":0.0})
-        cero_offset.update({"x":0.0,"y":0.0,"z":0.0})
-        actualizar_display_pos()
-        log("HOME completado ✓")
-    enviar_lista(["$X","$H"], on_done=_done)
+    def _run():
+        enviar_gcode("$X")
+        ok = enviar_gcode("$H")
+        if ok:
+            time.sleep(0.3)
+            # Establecer cero de trabajo en la posición home
+            enviar_gcode("G92 X0 Y0 Z0")
+            for a in ["x", "y", "z"]:
+                cero_offset[a] = posicion[a]
+            ventana.after(0, actualizar_display_pos)
+            ventana.after(0, lambda: log("HOME completado ✓"))
+        else:
+            ventana.after(0, lambda: log("⚠ HOME no completó correctamente"))
+
+    threading.Thread(target=_run, daemon=True).start()
 
 def parar():
     abort_flag.set()
@@ -563,51 +632,49 @@ def preview_perimetro():
 # BUILD GCODE
 # ============================================================
 def build_gcode_recta(x1, y1, x2, y2, feed, zp):
-    cmds = ["G21","G90"]
+    cmds = ["G21", "G90"]
     pasadas = calcular_pasadas(0, zp["z_final"], zp["paso"]) if zp["z_final"] != 0.0 else [0.0]
     n = len(pasadas)
     cmds.append(z_retract(zp["z_seguro"]))
     cmds.append(f"G0 X{x1:.3f} Y{y1:.3f}")
     for i, z in enumerate(pasadas):
-        cmds.append(f"; Pasada {i+1}/{n}  Z={z:.3f}")
         cmds.append(f"G1 Z{z:.3f} F{zp['feed_z']}")
         cmds.append(f"G1 X{x2:.3f} Y{y2:.3f} F{feed}")
-        if i < n-1:
+        if i < n - 1:
             cmds.append(z_retract(zp["z_seguro"]))
             cmds.append(f"G0 X{x1:.3f} Y{y1:.3f}")
     cmds.append(z_retract(zp["z_seguro"]))
     return cmds
 
 def build_gcode_arco(x1, y1, x2, y2, I, J, dire, feed, zp):
-    cmds = ["G21","G90"]
+    cmds = ["G21", "G90"]
     pasadas = calcular_pasadas(0, zp["z_final"], zp["paso"]) if zp["z_final"] != 0.0 else [0.0]
     n = len(pasadas)
     cmds.append(z_retract(zp["z_seguro"]))
     cmds.append(f"G0 X{x1:.3f} Y{y1:.3f}")
     for i, z in enumerate(pasadas):
-        cmds.append(f"; Pasada {i+1}/{n}  Z={z:.3f}")
+        # SIN comentario ';' — GRBL no responde ok a comentarios
         cmds.append(f"G1 Z{z:.3f} F{zp['feed_z']}")
         cmds.append(f"{dire} X{x2:.3f} Y{y2:.3f} I{I:.3f} J{J:.3f} F{feed}")
-        if i < n-1:
+        if i < n - 1:
             cmds.append(z_retract(zp["z_seguro"]))
             cmds.append(f"G0 X{x1:.3f} Y{y1:.3f}")
     cmds.append(z_retract(zp["z_seguro"]))
     return cmds
 
 def build_gcode_perimetro(x0, y0, xf, yf, feed, zp):
-    cmds = ["G21","G90"]
+    cmds = ["G21", "G90"]
     pasadas = calcular_pasadas(0, zp["z_final"], zp["paso"]) if zp["z_final"] != 0.0 else [0.0]
     n = len(pasadas)
     cmds.append(z_retract(zp["z_seguro"]))
     cmds.append(f"G0 X{x0:.3f} Y{y0:.3f}")
     for i, z in enumerate(pasadas):
-        cmds.append(f"; Pasada {i+1}/{n}  Z={z:.3f}")
         cmds.append(f"G1 Z{z:.3f} F{zp['feed_z']}")
         cmds.append(f"G1 X{xf:.3f} Y{y0:.3f} F{feed}")
         cmds.append(f"G1 X{xf:.3f} Y{yf:.3f}")
         cmds.append(f"G1 X{x0:.3f} Y{yf:.3f}")
         cmds.append(f"G1 X{x0:.3f} Y{y0:.3f}")
-        if i < n-1:
+        if i < n - 1:
             cmds.append(z_retract(zp["z_seguro"]))
     cmds.append(z_retract(zp["z_seguro"]))
     return cmds
@@ -1173,5 +1240,6 @@ log(f"Puertos disponibles: {listar_puertos()}")
 num_pasadas_label()
 dibujar_canvas()
 
-threading.Thread(target=hilo_posicion, daemon=True).start()
+threading.Thread(target=hilo_posicion,    daemon=True).start()
+threading.Thread(target=hilo_leer_serial, daemon=True).start()
 ventana.mainloop()
