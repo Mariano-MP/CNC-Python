@@ -531,13 +531,20 @@ def preview_arco():
         cx = float(ent_a_cx.get())
         cy = float(ent_a_cy.get())
         r  = float(ent_a_r.get())
+        dire = var_dir.get()
     except ValueError:
         return
     pts = []
-    for ang in range(0, 181, 3):
-        rad = math.radians(ang)
-        pts.append((cx + r * math.cos(math.pi - rad),
-                    cy + r * math.sin(math.pi - rad)))
+    if dire == "G2":  # horario = semicírculo SUPERIOR
+        for ang in range(180, -1, -3):
+            rad = math.radians(ang)
+            pts.append((cx + r * math.cos(rad),
+                        cy + r * math.sin(rad)))
+    else:             # G3 antihorario = semicírculo INFERIOR
+        for ang in range(180, 361, 3):
+            rad = math.radians(ang)
+            pts.append((cx + r * math.cos(rad),
+                        cy + r * math.sin(rad)))
     dibujar_canvas(path_puntos=pts, tipo="arco")
 
 def preview_perimetro():
@@ -644,12 +651,23 @@ def trayectoria_arco():
     except ValueError:
         messagebox.showerror("Error","Valores inválidos"); return
     preview_arco()
-    x1 = cx - r; y1 = cy; x2 = cx + r; y2 = cy; I = -r; J = 0
+
+    if dire == "G2":
+        # Horario: izquierda → derecha pasando por ABAJO
+        x1 = cx - r;  y1 = cy
+        x2 = cx + r;  y2 = cy
+        I  = r;       J  = 0    # inicio→centro = (+r, 0)
+    else:
+        # Antihorario: izquierda → derecha pasando por ARRIBA
+        x1 = cx - r;  y1 = cy
+        x2 = cx + r;  y2 = cy
+        I  = r;       J  = 0    # mismo punto de inicio, mismo I/J
+
     pasadas = calcular_pasadas(0, zp["z_final"], zp["paso"]) if zp["z_final"] != 0 else [0]
     lbl_tray_info.config(text=f"Semiarco R={r:.1f}mm  ×{len(pasadas)} pasada(s)", fg=ACCENT)
     cmds = build_gcode_arco(x1, y1, x2, y2, I, J, dire, feed, zp)
     prog_bar["value"] = 0
-    log(f"▶ Semiarco R={r:.1f}: {len(cmds)} comandos")
+    log(f"▶ Semiarco {dire} R={r:.1f}: inicio({x1:.1f},{y1:.1f}) → fin({x2:.1f},{y2:.1f}) I={I:.1f} J={J:.1f}")
     enviar_lista(cmds,
         on_done=lambda: [lbl_tray_info.config(text="✓ Semiarco completado", fg=GREEN),
                          prog_bar.__setitem__("value", 100)],
