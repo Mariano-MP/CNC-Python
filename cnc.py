@@ -273,8 +273,8 @@ def num_pasadas_label():
 # ============================================================
 # CANVAS PREVIEW — NUEVO SISTEMA
 # ============================================================
-CANVAS_W = 440
-CANVAS_H = 340
+CANVAS_W = 800
+CANVAS_H = 500
 
 _preview_path = []
 
@@ -340,7 +340,7 @@ def dibujar_canvas(path_puntos=None, tipo="recta", cabezal=None):
         return mm_to_canvas_new(x, y, scale, off_x, off_y, maq_y)
 
     # ── Fondo ────────────────────────────────────────────────
-    canvas_preview.config(bg="#090c10")
+    canvas_preview.config(bg="#100909")
 
     # ── Cuadrícula con paso calculado ───────────────────────
     paso = calcular_paso_grid(scale)
@@ -375,7 +375,7 @@ def dibujar_canvas(path_puntos=None, tipo="recta", cabezal=None):
 
     # Título eje X
     px_mid, _ = to_c(maq_x / 2, 0)
-    _, py_bot = to_c(0, 0)
+    _, py_bot = to_c(0, -10)
     canvas_preview.create_text(px_mid, py_bot + 22,
                                text="X (mm)", fill="#2a5070",
                                font=FONT_SMALL)
@@ -435,12 +435,12 @@ def dibujar_canvas(path_puntos=None, tipo="recta", cabezal=None):
 
     # Cotas de la tabla
     mid_x_t = (x0t + xft) / 2
-    canvas_preview.create_text(mid_x_t, y0t + 14,
+    canvas_preview.create_text(mid_x_t, y0t - 10,
                                text=f"← {tab_x:.0f} mm →",
                                fill=ACCENT, font=FONT_SMALL)
     mid_y_t = (y0t + yft) / 2
-    canvas_preview.create_text(x0t - 18, mid_y_t,
-                               text=f"{tab_y:.0f}", fill=ACCENT,
+    canvas_preview.create_text(x0t + 8, mid_y_t,
+                               text=f"← {tab_y:.0f} mm →", fill=ACCENT,
                                font=FONT_SMALL, angle=90)
 
     # ── Origen 0,0 ───────────────────────────────────────────
@@ -460,7 +460,7 @@ def dibujar_canvas(path_puntos=None, tipo="recta", cabezal=None):
             x2c, y2c = pts_canvas[i + 1]
             canvas_preview.create_line(x1c, y1c, x2c, y2c,
                                        fill=AMBER, width=2,
-                                       dash=(8, 5),
+                                       dash=(85, 5),
                                        capstyle="round")
 
         # Marcadores inicio / fin
@@ -472,7 +472,7 @@ def dibujar_canvas(path_puntos=None, tipo="recta", cabezal=None):
                                    text="S", fill=GREEN, font=FONT_SMALL)
         canvas_preview.create_oval(ex2 - 5, ey2 - 5, ex2 + 5, ey2 + 5,
                                    fill=AMBER, outline=AMBER)
-        canvas_preview.create_text(ex2 + 10, ey2 - 8,
+        canvas_preview.create_text(ex2 + 10, ey2 + 8,
                                    text="E", fill=AMBER, font=FONT_SMALL)
 
     # ── Cabezal (posición actual) ─────────────────────────────
@@ -487,15 +487,15 @@ def dibujar_canvas(path_puntos=None, tipo="recta", cabezal=None):
                                fill=RED, width=2)
     canvas_preview.create_oval(hxc - 5, hyc - 5, hxc + 5, hyc + 5,
                                outline=RED, width=2, fill="")
-    canvas_preview.create_oval(hxc - 10, hyc - 10, hxc + 10, hyc + 10,
-                               outline=RED, width=1, fill="", dash=(3, 3))
+    """canvas_preview.create_oval(hxc - 10, hyc - 10, hxc + 10, hyc + 10,
+                               outline=RED, width=1, fill="", dash=(3, 3))"""
 
     # ── Leyenda ───────────────────────────────────────────────
-    lx, ly = 6, ch - 12
+    lx, ly = 6, ch - 20
     items = [
         ("━", "#1a5090", f"Máquina ({maq_x:.0f}×{maq_y:.0f})"),
         ("━", ACCENT,    "Tabla de trabajo"),
-        ("╌", AMBER,     "Trayectoria"),
+        ("--", AMBER,     "Trayectoria"),
         ("●", GREEN,     "Inicio (S)"),
         ("●", AMBER,     "Fin (E)"),
         ("✛", RED,       "Cabezal"),
@@ -503,10 +503,10 @@ def dibujar_canvas(path_puntos=None, tipo="recta", cabezal=None):
     for sym, color, label in items:
         canvas_preview.create_text(lx, ly, text=sym,
                                    fill=color, font=FONT_SMALL, anchor="w")
-        lx += 10
+        lx += 30
         canvas_preview.create_text(lx, ly, text=label,
                                    fill=FG2, font=FONT_SMALL, anchor="w")
-        lx += len(label) * 6 + 10
+        lx += len(label) * 6 + 30
 
 
 def actualizar_cabezal():
@@ -758,7 +758,7 @@ def field_row(parent, label_txt, default, unit="mm", width=8):
 # ============================================================
 ventana = tk.Tk()
 ventana.title("CNC Control  ▸  GRBL  v3")
-ventana.geometry("1200x800")
+ventana.geometry("1800x1200")
 ventana.configure(bg=BG)
 ventana.resizable(True, True)
 
@@ -930,14 +930,14 @@ toggle_z_ui()
 frm_colB = tk.Frame(frm_body, bg=BG3)
 frm_colB.pack(side="left", fill="both", expand=True, padx=(0,1))
 
-frm_canvas_header = tk.Frame(frm_colB, bg="#070a0d", pady=4)
+frm_canvas_header = tk.Frame(frm_colB, bg="#0d0707", pady=4)
 frm_canvas_header.pack(fill="x")
 tk.Frame(frm_canvas_header, bg=GREEN, height=2).pack(fill="x")
 frm_ch_inner = tk.Frame(frm_canvas_header, bg="#070a0d")
 frm_ch_inner.pack(fill="x", padx=10, pady=4)
-tk.Label(frm_ch_inner, text="VISTA DE TABLA", bg="#070a0d",
+tk.Label(frm_ch_inner, text="Simulación", bg="#070a0d",
          fg=GREEN, font=FONT_TITLE).pack(side="left")
-tk.Label(frm_ch_inner, text="  — previsualización de trayectoria", bg="#070a0d",
+tk.Label(frm_ch_inner, text="  — vista de trayectoria", bg="#070a0d",
          fg=FG2, font=FONT_SMALL).pack(side="left")
 
 make_btn(frm_ch_inner, "✕ Limpiar",
@@ -952,6 +952,8 @@ canvas_preview = tk.Canvas(canvas_frame, width=CANVAS_W, height=CANVAS_H,
                              highlightbackground="#1a2535",
                              relief="flat")
 canvas_preview.pack(expand=True)
+
+
 
 frm_tray_bar = tk.Frame(frm_colB, bg="#070a0d", pady=4)
 frm_tray_bar.pack(fill="x")
