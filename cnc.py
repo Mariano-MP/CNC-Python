@@ -988,7 +988,7 @@ for txt, val in [("Superficie (Z=0)", "superficie"),
 frm_zp = tk.Frame(inner_z, bg=BG2); frm_zp.pack(fill="x", pady=2)
 tk.Label(frm_zp, text="Profundidad:", bg=BG2, fg=FG2,
          font=FONT_MONO, width=14, anchor="w").pack(side="left")
-ent_z_prof = make_entry(frm_zp, "5", width=7); ent_z_prof.pack(side="left")
+ent_z_prof = make_entry(frm_zp, "0", width=7); ent_z_prof.pack(side="left")
 tk.Label(frm_zp, text="mm", bg=BG2, fg="#1a3050", font=FONT_SMALL).pack(side="left", padx=3)
 
 tk.Frame(inner_z, bg="#1a2535", height=1).pack(fill="x", pady=3)
@@ -1144,7 +1144,7 @@ tk.Label(tab_a, text="GEOMETRÍA", bg=BG2, fg=ACCENT, font=FONT_SMALL).pack(anch
 ent_a_cx  = field_row(tab_a, "Centro X:", "150")
 ent_a_cy  = field_row(tab_a, "Centro Y:", "0")
 ent_a_r   = field_row(tab_a, "Radio:", "150")
-ent_a_feed= field_row(tab_a, "Feed XY:", "300", "mm/m")
+ent_a_feed= field_row(tab_a, "Feed XY:", "500", "mm/m")
 
 frm_adir = tk.Frame(tab_a, bg=BG2); frm_adir.pack(fill="x", padx=10, pady=3)
 tk.Label(frm_adir, text="Dirección:", bg=BG2, fg=FG2,
@@ -1156,7 +1156,7 @@ for txt, val in [("G2 Horario","G2"),("G3 Anti-h.","G3")]:
                    activebackground=BG2, font=FONT_SMALL).pack(side="left", padx=4)
 
 frm_ab = tk.Frame(tab_a, bg=BG2); frm_ab.pack(fill="x", padx=8, pady=4)
-make_btn(frm_ab, "Radio=Ancho/2", arco_desde_tabla, width=15).pack(side="left", padx=2)
+#make_btn(frm_ab, "Radio=Ancho/2", arco_desde_tabla, width=15).pack(side="left", padx=2)#
 
 # BOTÓN PREVISUALIZAR (nuevo, explícito)
 make_btn(tab_a, "👁  PREVISUALIZAR", preview_arco,
@@ -1171,7 +1171,7 @@ tab_p = tk.Frame(nb, bg=BG2); nb.add(tab_p, text=" Perímetro ")
 tk.Label(tab_p, text="Recorre el borde de la tabla completo",
          bg=BG2, fg=FG2, font=FONT_SMALL).pack(anchor="w", padx=10, pady=(10,4))
 ent_p_off  = field_row(tab_p, "Offset (margen):", "0")
-ent_p_feed = field_row(tab_p, "Feed XY:", "400", "mm/m")
+ent_p_feed = field_row(tab_p, "Feed XY:", "500", "mm/m")
 
 # BOTÓN PREVISUALIZAR (mantenido + ahora también explícito sin auto-bind)
 make_btn(tab_p, "👁  PREVISUALIZAR", preview_perimetro,
