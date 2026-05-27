@@ -424,8 +424,8 @@ ventana.geometry("900x740")
 ventana.configure(bg="#1a1a1a")
 
 FONT_MONO  = ("Consolas", 10)
-FONT_BIG   = ("Consolas", 13, "bold")
-FONT_SMALL = ("Consolas", 9)
+FONT_BIG   = ("Consolas", 15, "bold")
+FONT_SMALL = ("Consolas", 8)
 BG    = "#1a1a1a"
 BG2   = "#252525"
 BG3   = "#2e2e2e"
@@ -478,13 +478,7 @@ lbl_estado.pack(side="left")
 
 btn(frm_top,"⚠ PARAR",parar,color=RED,fg="white",width=10).pack(side="right", padx=4)
 
-# ─── BARRA DE PROGRESO ──────────────────────────────────────
-prog_bar = ttk.Progressbar(ventana, mode="determinate", maximum=100)
-prog_bar.pack(fill="x", padx=10, pady=(0,2))
 
-lbl_tray_info = tk.Label(ventana, text="Ninguna trayectoria activa",
-                          bg=BG, fg=AMBER, font=FONT_SMALL, anchor="w")
-lbl_tray_info.pack(fill="x", padx=12)
 
 # ─── CUERPO PRINCIPAL ───────────────────────────────────────
 frm_main = tk.Frame(ventana, bg=BG)
@@ -495,36 +489,36 @@ frm_left = tk.Frame(frm_main, bg=BG)
 frm_left.pack(side="left", fill="y", padx=(0,8))
 
 # — Posición actual —
-frm_pos = tk.LabelFrame(frm_left, text=" Posición actual ", bg=BG2, fg=ACCENT,
+frm_pos = tk.LabelFrame(frm_left, text=" Posición actual ", bg=BG2, fg="#FFFFFF",
                          font=FONT_MONO, bd=1, relief="groove")
 frm_pos.pack(fill="x", pady=3)
 
-lbl_pos_x = tk.Label(frm_pos,text="X: +0.000 mm",bg=BG2,fg=GREEN,font=FONT_BIG)
+lbl_pos_x = tk.Label(frm_pos,text="X: +0.000 mm",bg=BG2,fg="#67EE19",font=FONT_BIG)
 lbl_pos_x.pack(anchor="w",padx=8,pady=1)
-lbl_pos_y = tk.Label(frm_pos,text="Y: +0.000 mm",bg=BG2,fg=GREEN,font=FONT_BIG)
+lbl_pos_y = tk.Label(frm_pos,text="Y: +0.000 mm",bg=BG2,fg="#FD0000",font=FONT_BIG)
 lbl_pos_y.pack(anchor="w",padx=8,pady=1)
-lbl_pos_z = tk.Label(frm_pos,text="Z: +0.000 mm",bg=BG2,fg=GREEN,font=FONT_BIG)
+lbl_pos_z = tk.Label(frm_pos,text="Z: +0.000 mm",bg=BG2,fg="#63CFEB",font=FONT_BIG)
 lbl_pos_z.pack(anchor="w",padx=8,pady=1)
 
 frm_z0 = tk.Frame(frm_pos, bg=BG2); frm_z0.pack(fill="x", padx=6, pady=4)
 for txt,ax in [("X=0","x"),("Y=0","y"),("Z=0","z")]:
-    btn(frm_z0,txt,lambda a=ax:set_cero(a),color="#002244",fg=FG,width=5).pack(side="left",padx=2)
-btn(frm_z0,"XYZ=0",lambda:set_cero(None),color="#3a2a00",fg=AMBER,width=7).pack(side="left",padx=2)
+    btn(frm_z0,txt,lambda a=ax:set_cero(a),color="#FFFFFF",fg="#000000",width=5).pack(side="left",padx=2)
+btn(frm_z0,"XYZ=0",lambda:set_cero(None),color="#ffe100",fg="#000000",width=7).pack(side="left",padx=2)
 
 # — Tabla —
-frm_tabla = tk.LabelFrame(frm_left, text=" Dimensiones de tabla ", bg=BG2, fg=ACCENT,
+frm_tabla = tk.LabelFrame(frm_left, text=" Dimensiones de tabla ", bg=BG2, fg="#FFFFFF",
                            font=FONT_MONO, bd=1, relief="groove")
 frm_tabla.pack(fill="x", pady=3)
 
 ent_tabla_x = field_row(frm_tabla,"Ancho X:","300")
 ent_tabla_y = field_row(frm_tabla,"Alto  Y:","200")
-ent_tabla_z = field_row(frm_tabla,"Espesor Z:","5")
+ent_tabla_z = field_row(frm_tabla,"Espesor Z:","2")
 
 # — HOME —
-btn(frm_left,"⌂  HOME",hacer_home,color="#1a2244",fg="white",width=26).pack(fill="x",pady=4)
+btn(frm_left,"⌂  HOME",hacer_home,color="#dd00ff",fg="#FFFFFF",width=20).pack(fill="x",pady=4)
 
 # ══ PANEL Z (pasadas) ═══════════════════════════════════════
-frm_z = tk.LabelFrame(frm_left, text=" Pasadas en Z ", bg=BG2, fg=PURPLE,
+frm_z = tk.LabelFrame(frm_left, text=" Pasadas en Z ", bg=BG2, fg="#FFFFFF",
                        font=FONT_MONO, bd=1, relief="groove")
 frm_z.pack(fill="x", pady=3)
 
@@ -536,19 +530,19 @@ frm_zmodo = tk.Frame(frm_z, bg=BG2); frm_zmodo.pack(fill="x", padx=6, pady=4)
 frm_zprof = tk.Frame(frm_z, bg=BG2); frm_zprof.pack(fill="x", padx=6)
 tk.Label(frm_zprof,text="Profundidad:",bg=BG2,fg=FG,font=FONT_MONO,width=14,anchor="w").pack(side="left")
 ent_z_prof = entry(frm_zprof,"5",width=7); ent_z_prof.pack(side="left")
-tk.Label(frm_zprof,text="mm",bg=BG2,fg="#555",font=FONT_SMALL).pack(side="left",padx=3)
+tk.Label(frm_zprof,text="mm",bg=BG2,fg="#FFFFFF",font=FONT_MONO).pack(side="left",padx=3)
 
 tk.Frame(frm_z,bg=BG2,height=4).pack()
 
 ent_z_paso   = field_row(frm_z,"Paso por pasada:","0.5")
 ent_z_feed   = field_row(frm_z,"Veloc. bajada Z:","100","mm/m")
-ent_z_seguro = field_row(frm_z,"Z seguro (retract):","5")
+ent_z_seguro = field_row(frm_z,"Z seguro (retract):","0")
 
 lbl_pasadas = tk.Label(frm_z, text="Pasadas: 1 (superficie)", bg=BG2,
-                        fg=PURPLE, font=FONT_SMALL)
+                        fg="#63CFEB", font=FONT_SMALL)
 lbl_pasadas.pack(anchor="w", padx=8, pady=2)
 
-btn(frm_z,"↺ Calcular pasadas",num_pasadas_label,color="#2a1a44",fg=PURPLE,width=24).pack(
+btn(frm_z,"↺ Calcular pasadas",num_pasadas_label,color="#63CFEB",fg="#FFFFFF",width=24).pack(
     padx=6, pady=4)
 
 # toggle_z_ui se define ANTES de los radio buttons que la usan como command
@@ -582,12 +576,12 @@ tab_j = tk.Frame(nb, bg=BG2); nb.add(tab_j, text="  Jog  ")
 frm_jog_params = tk.Frame(tab_j, bg=BG2); frm_jog_params.pack(fill="x", padx=10, pady=(10,4))
 
 ent_jog_step = field_row(tab_j, "Paso:", "1")
-ent_jog_feed = field_row(tab_j, "Feed jog:", "500", "mm/m")
+ent_jog_feed = field_row(tab_j, "Feed jog:", "300", "mm/m")
 
 # — Presets de paso —
 frm_steps = tk.Frame(tab_j, bg=BG2); frm_steps.pack(fill="x", padx=10, pady=4)
 lbl(frm_steps, "Paso rápido:").pack(side="left")
-for s in ["0.01", "0.1", "1", "5", "10"]:
+for s in ["0.1", "1", "5", "10", "100"]:
     btn(frm_steps, s,
         lambda v=s: [ent_jog_step.delete(0,"end"), ent_jog_step.insert(0,v)],
         width=5).pack(side="left", padx=2)
@@ -597,23 +591,23 @@ frm_jog = tk.Frame(tab_j, bg=BG2); frm_jog.pack(pady=10)
 
 # Fila 1: vacío | Y+ | vacío
 tk.Frame(frm_jog, bg=BG2, width=60, height=60).grid(row=0, column=0, padx=3, pady=3)
-btn(frm_jog,"Y+", lambda:jog_move("Y", 1), color=ACCENT, fg="white", width=4).grid(row=0, column=1, padx=3, pady=3)
+btn(frm_jog,"Y+", lambda:jog_move("Y", 1), color="#FD0000", fg="white", width=4).grid(row=0, column=1, padx=3, pady=3)
 tk.Frame(frm_jog, bg=BG2, width=60, height=60).grid(row=0, column=2, padx=3, pady=3)
 
 # Fila 2: X- | · | X+
-btn(frm_jog,"X-", lambda:jog_move("X",-1), color=ACCENT, fg="white", width=4).grid(row=1, column=0, padx=3, pady=3)
+btn(frm_jog,"X-", lambda:jog_move("X",-1), color="#67EE19", fg="white", width=4).grid(row=1, column=0, padx=3, pady=3)
 lbl(frm_jog, "XY").grid(row=1, column=1)
-btn(frm_jog,"X+", lambda:jog_move("X", 1), color=ACCENT, fg="white", width=4).grid(row=1, column=2, padx=3, pady=3)
+btn(frm_jog,"X+", lambda:jog_move("X", 1), color="#67EE19", fg="white", width=4).grid(row=1, column=2, padx=3, pady=3)
 
 # Fila 3: vacío | Y- | vacío
 tk.Frame(frm_jog, bg=BG2, width=60, height=60).grid(row=2, column=0, padx=3, pady=3)
-btn(frm_jog,"Y-", lambda:jog_move("Y",-1), color=ACCENT, fg="white", width=4).grid(row=2, column=1, padx=3, pady=3)
+btn(frm_jog,"Y-", lambda:jog_move("Y",-1), color="#FD0000", fg="white", width=4).grid(row=2, column=1, padx=3, pady=3)
 tk.Frame(frm_jog, bg=BG2, width=60, height=60).grid(row=2, column=2, padx=3, pady=3)
 
 # — Eje Z —
 frm_z_jog = tk.Frame(tab_j, bg=BG2); frm_z_jog.pack(pady=4)
-btn(frm_z_jog,"Z+", lambda:jog_move("Z", 1), color=PURPLE, fg="white", width=6).pack(side="left", padx=6)
-btn(frm_z_jog,"Z-", lambda:jog_move("Z",-1), color=PURPLE, fg="white", width=6).pack(side="left", padx=6)
+btn(frm_z_jog,"Z+", lambda:jog_move("Z", 1), color="#63CFEB", fg="white", width=6).pack(side="left", padx=6)
+btn(frm_z_jog,"Z-", lambda:jog_move("Z",-1), color="#63CFEB", fg="white", width=6).pack(side="left", padx=6)
 
 # — Cancelar jog —
 btn(tab_j, "⏹ Cancelar jog",
